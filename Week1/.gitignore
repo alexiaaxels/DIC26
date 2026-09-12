@@ -1,0 +1,4 @@
+.DS_Store
+delta/
+data/hourly_88101_2024.csv
+data/*.parquet
