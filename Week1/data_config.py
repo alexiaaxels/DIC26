@@ -73,7 +73,7 @@ DATASET_CONFIGS = {
         },
         'key_cols': [],
         'timestamp_builder': taxi_trips_timestamp,
-        'numeric_checks': {'trip_distance': (0,None), 'fare_amount': (0, None)},
+        'numeric_checks': {'trip_distance': (0,None), 'fare_amount': (0, None), 'passenger_count': (1, None)},
         'transform': filter_unknown_locations,
         'schema_version': '1.0'
     },
