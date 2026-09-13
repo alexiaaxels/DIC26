@@ -15,7 +15,7 @@ from data_config import DATASET_CONFIGS
 
 spark = (
     SparkSession.builder
-    .appName("Task 3")
+    .appName("Task 3 Generic Ingestion Framework")
     .master("local[*]")
     .config("spark.driver.host", "127.0.0.1")
     .config("spark.driver.bindAddress", "127.0.0.1")
@@ -26,6 +26,7 @@ spark = (
     .getOrCreate()
 )
 
+# create a dataframe for the datasets
 def load_datasets(config):
     reader = spark.read.option('header', True).option('inferSchema', True)
     if config['format'] == 'csv':
@@ -34,28 +35,20 @@ def load_datasets(config):
         return spark.read.parquet(*config['path'] if isinstance(config['path'], list) else [config['path']])
     raise ValueError(f"Unsupported format: {config['format']}")
 
+# validates that the dataframe has all expected cols
 def validate_schema(df, config, name):
     missing = config['expected_cols'] - set(c.lower() for c in df.columns)
     if missing:
         raise ValueError(f"[{name}] missing expected columns: {missing}")
 
-def empty_strings_to_null(df):
-    for field in df.schema.fields:
-        if isinstance(field.dataType, StringType):
-            df = df.withColumn(
-                field.name,
-                when(trim(col(field.name)) == '',
-                     None).otherwise(col(field.name))
-            )
-    return df
-
+# normalize the timestamps to time_utc with the type timestamp_ntz
 def normalize(df, config):
     if config['timestamp_builder']:
         df = config['timestamp_builder'](df)
-    df = empty_strings_to_null(df)
     return df
 
-def data_quality_check(df, config, name):
+# drops duplicated and null primary keys, filters out rows where the time_utc is null, filters out outliers and returns row count  
+def data_quality_check(df, config):
     total = df.count()
     df = df.dropDuplicates(config['key_cols'])
     df = df.dropna(subset=config['key_cols'])
@@ -74,6 +67,7 @@ def to_snake_case(name: str) -> str:
  name = re.sub(r'\s+', '_', name)
  return name.lower()
 
+# goes through each column header and formats it to snake_case
 def standardize_column_names(df):
     for name in df.columns:
         df = df.withColumnRenamed(name, to_snake_case(name))
@@ -96,7 +90,7 @@ def ingest(name, config):
         'records_loaded': total,
         'execution_time_s': round(time.time() - start, 2),
         'schema_version': config['schema_version'],
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(datetime.timezone.utc).isoformat(),
     }
 
 metadata_rows = [ingest(name, cfg) for name, cfg in DATASET_CONFIGS.items()]
