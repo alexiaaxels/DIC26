@@ -1,3 +1,10 @@
+import os
+import sys
+
+os.environ['PYSPARK_PYTHON'] = sys.executable
+os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
+
+
 from pyspark.sql import SparkSession
 import re
 from pyspark.sql.functions import col, when, trim
@@ -10,6 +17,8 @@ spark = (
     SparkSession.builder
     .appName("Task 3")
     .master("local[*]")
+    .config("spark.driver.host", "127.0.0.1")
+    .config("spark.driver.bindAddress", "127.0.0.1")
     .config("spark.driver.memory", "4g")
     .config("spark.jars.packages", "io.delta:delta-spark_2.13:4.0.0")
     .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
