@@ -15,15 +15,18 @@ The project consists of several Python scripts, with each script corresponding t
 
 ## Run ingestion:
 `python3 task3.py`
+
 Produces: 4 Delta tables
 - air_quality (`delta/air_quality`)
 - taxi_trips (`delta/taxi_trips`)
 - taxi_zone (`delta/taxi_zone`)
 - weather (`delta/weather`)
+
 Also produces ingestion metadata (`delta/_ingestion_metadata`)
 
 ## Run integration pipeline:
 `python3 task5_integration.py`
+
 Produces: 1 Delta table: integrated_taxi_trips (`delta/integrated_taxi_trips`)
 
 ## Run benchmarks:
