@@ -28,38 +28,37 @@ def get_dir_size_and_files(path):
     return round(total_size / (1024 * 1024), 2), total_files
 
 def run_benchmarks():
-    trips_df = spark.read.format("delta").load("delta/taxi_trips")
+    integrated_df = spark.read.format("delta").load("delta/integrated_taxi_trips")
 
     # storage design strategy A: no partition
     t0 = time.time()
-    trips_df.write.format("delta").mode("overwrite").save("delta/bench_unpartitioned")
+    integrated_df.write.format("delta").mode("overwrite").save("delta/bench_unpartitioned")
     ingest_time_a = round(time.time() - t0, 2)
     size_a, files_a = get_dir_size_and_files("delta/bench_unpartitioned")
 
-    # storage design strategy B: partitioned by pickup date (TODO: should we do month instead of day?)
+    # storage design strategy B: partitioned by pickup date
     t0 = time.time()
-    trips_df.withColumn("pickup_date", date_format(col("pickup_time_local"), "yyyy-MM-dd")) \
-        .write.format("delta").mode("overwrite").partitionBy("pickup_date").save("delta/bench_partitioned")
+    integrated_df.withColumn("pickup_month", date_format(col("pickup_time_local"), "yyyy-MM")) \
+        .write.format("delta") \
+        .mode("overwrite") \
+        .partitionBy("pickup_month") \
+        .save("delta/bench_partitioned")
     ingest_time_b = round(time.time() - t0, 2)
     size_b, files_b = get_dir_size_and_files("delta/bench_partitioned")
 
     def execute_queries(table_path):
         df = spark.read.format("delta").load(table_path)
-        zones = spark.read.format("delta").load("delta/taxi_zone")
-
         t_start = time.time()
         
         # query 1: number of taxi trips per borough
-        q1 = df.join(zones, df["pu_location_id"] == zones["location_id"]) \
-               .groupBy("borough").agg(count("*")).collect()
+        q1 = df.groupBy("pickup_borough").agg(count("*")).collect()
         
         # query 2: average trip duration per day
         q2 = df.withColumn("duration_s", unix_timestamp("dropoff_time_local") - unix_timestamp("pickup_time_local")) \
-               .groupBy(date_format(col("pickup_time_local"), "yyyy-MM-dd")).agg(avg("duration_s")).collect()
+               .groupBy("pickup_date").agg(avg("duration_s")).collect()
                
         # query 3: average fare per borough
-        q3 = df.join(zones, df["pu_location_id"] == zones["location_id"]) \
-               .groupBy("borough").agg(avg("fare_amount")).collect()
+        q3 = df.groupBy("pickup_borough").agg(avg("fare_amount")).collect()
         
         return round(time.time() - t_start, 2)
 

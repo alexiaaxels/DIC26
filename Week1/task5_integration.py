@@ -86,6 +86,13 @@ def build_integrated_dataset():
         )
     )
 
+    trips_with_zones = trips_with_zones.drop(
+        "location_id",
+        "borough",
+        "zone",
+        "service_zone"
+    )
+
     aq_hourly = (
         air_quality
         .select(
