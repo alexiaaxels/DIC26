@@ -1,6 +1,5 @@
 A README describing how to run the platform.
 
-Specify versions and such?
 # Requirements
 To run the project, you will need:
 - Java 17
