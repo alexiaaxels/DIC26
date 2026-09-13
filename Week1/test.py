@@ -32,7 +32,11 @@ airQuality = (
     .csv("Data/hourly_88101_2024.csv")
 )
 
-taxiTrips = spark.read.parquet("Data/yellow_tripdata_2024-01.parquet", "Data/yellow_tripdata_2024-02.parquet", "Data/yellow_tripdata_2024-03.parquet")
+taxiTrips = spark.read.parquet(
+    "Data/yellow_tripdata_2024-01.parquet",
+    "Data/yellow_tripdata_2024-02.parquet",
+    "Data/yellow_tripdata_2024-03.parquet"
+)
 
 
 ### PRINT SCHEMA:
