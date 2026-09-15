@@ -71,7 +71,7 @@ DATASET_CONFIGS = {
         'format': 'parquet',
         'expected_cols': { 'vendor_id', 'ratecode_id', 'tpep_pickup_datetime', 'tpep_dropoff_datetime', 'passenger_count', 'trip_distance', 'pu_location_id', 'do_location_id', 'fare_amount'
         },
-        'key_cols': [],
+        'key_cols': ['vendor_id', 'pickup_time_local', 'dropoff_time_local', 'pu_location_id', 'do_location_id', 'fare_amount'],
         'timestamp_builder': taxi_trips_timestamp,
         'numeric_checks': {'trip_distance': (0,None), 'fare_amount': (0, None), 'passenger_count': (1, None)},
         'transform': filter_unknown_locations,
