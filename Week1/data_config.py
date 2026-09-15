@@ -60,7 +60,7 @@ DATASET_CONFIGS = {
         'path': "data/hourly_88101_2024.csv",
         'format': 'csv',
         'expected_cols': {'state_code', 'county_code', 'site_num', 'poc', 'date_gmt', 'time_gmt', 'sample_measurement'},
-        'key_cols': ['state_code', 'county_code', 'site_num', 'date_local', 'time_local' 'poc'],
+        'key_cols': ['state_code', 'county_code', 'site_num', 'date_local', 'time_local', 'poc'],
         'timestamp_builder': air_quality_timestamp,
         'numeric_checks': {'sample_measurement': (0, None)},
         'transform': None,

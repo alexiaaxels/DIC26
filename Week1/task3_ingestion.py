@@ -8,7 +8,7 @@ os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
 from pyspark.sql import SparkSession
 import re
 from pyspark.sql.functions import col, when, trim
-from datetime import datetime
+from datetime import datetime, timezone
 from pyspark.sql.types import StringType
 import time
 from data_config import DATASET_CONFIGS 
@@ -81,7 +81,7 @@ def ingest(name, config):
     df = normalize(df, config)
     if config["transform"]:
         df = config["transform"](df)
-    df, total, rejected = data_quality_check(df, config, name)
+    df, total, rejected = data_quality_check(df, config)
     df.write.format("delta").mode("overwrite").save(f"delta/{name}")
     return {
         'dataset': name,
@@ -90,7 +90,7 @@ def ingest(name, config):
         'records_loaded': total,
         'execution_time_s': round(time.time() - start, 2),
         'schema_version': config['schema_version'],
-        'timestamp': datetime.now(datetime.timezone.utc).isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
     }
 
 metadata_rows = [ingest(name, cfg) for name, cfg in DATASET_CONFIGS.items()]
