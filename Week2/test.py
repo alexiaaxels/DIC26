@@ -33,6 +33,8 @@ spark = (
 taxiTrips = spark.read.format("delta").load(INTEGRATED_TAXI_TRIPS_PATH)
 
 
+# TODO: would be nice to extract this spark init stuff to a common shared component, since it will be the same for all the queries
+
 # SCHEMA:
 #  |-- state_code: string (nullable = true)
 #  |-- county_code: string (nullable = true)
@@ -97,32 +99,49 @@ taxiTrips = spark.read.format("delta").load(INTEGRATED_TAXI_TRIPS_PATH)
 # Count trips grouped by taxi zone
 # Also, should dropoff_zone be considered as well? 
 
-taxiTrips.withColumn("pickup_month", date_format(col("pickup_date"), "yyyy-MM"))\
-    .groupBy("pickup_month", "pickup_zone")\
-    .agg(count("*").alias("num_trips"))\
-    .orderBy(desc("num_trips")).show(20, truncate=False)
+
+taxiTrips.createOrReplaceTempView("integrated_taxi_trips")
+
+something = spark.sql(
+    """
+    select 
+        date_format(pickup_date, 'yyyy-MM') as pickup_month,
+        pickup_zone,
+        count(*) as num_trips
+    from 
+        integrated_taxi_trips
+    group by pickup_month, pickup_zone
+    """)
+
+something.show()
+
+
+# taxiTrips.withColumn("pickup_month", date_format(col("pickup_date"), "yyyy-MM"))\
+#     .groupBy("pickup_month", "pickup_zone")\
+#     .agg(count("*").alias("num_trips"))\
+#     .orderBy(desc("num_trips")).show(20, truncate=False)
 
 
 
 # # 2. Average trip distance under different weather conditions.
 
-taxiTrips.withColumn(
-    "weather_condition",
-    when(col("pickup_weather_condition_code") == 1,               lit("Clear"))
-    .when(col("pickup_weather_condition_code") == 2,               lit("Fair"))
-    .when(col("pickup_weather_condition_code") == 3,               lit("Cloudy"))
-    .when(col("pickup_weather_condition_code") == 4,               lit("Overcast"))
-    .when(col("pickup_weather_condition_code").isin(5, 6),         lit("Fog"))
-    .when(col("pickup_weather_condition_code").isin(7, 8, 17, 18), lit("Rain"))
-    .when(col("pickup_weather_condition_code") == 9,               lit("Heavy Rain"))
-    .when(col("pickup_weather_condition_code").isin(10, 11),       lit("Freezing Rain"))
-    .when(col("pickup_weather_condition_code").isin(12, 13, 19, 20), lit("Sleet"))
-    .when(col("pickup_weather_condition_code").isin(14, 15, 16, 21, 22), lit("Snow"))
-    .when(col("pickup_weather_condition_code").isin(23, 24, 25, 26, 27), lit("Storm"))
-    .otherwise(lit("Unknown"))
-    ).groupBy("weather_condition").agg(
-        spark_round(avg("trip_distance"),3).alias("avg_miles")
-    ).show(truncate=False)
+# taxiTrips.withColumn(
+#     "weather_condition",
+#     when(col("pickup_weather_condition_code") == 1,               lit("Clear"))
+#     .when(col("pickup_weather_condition_code") == 2,               lit("Fair"))
+#     .when(col("pickup_weather_condition_code") == 3,               lit("Cloudy"))
+#     .when(col("pickup_weather_condition_code") == 4,               lit("Overcast"))
+#     .when(col("pickup_weather_condition_code").isin(5, 6),         lit("Fog"))
+#     .when(col("pickup_weather_condition_code").isin(7, 8, 17, 18), lit("Rain"))
+#     .when(col("pickup_weather_condition_code") == 9,               lit("Heavy Rain"))
+#     .when(col("pickup_weather_condition_code").isin(10, 11),       lit("Freezing Rain"))
+#     .when(col("pickup_weather_condition_code").isin(12, 13, 19, 20), lit("Sleet"))
+#     .when(col("pickup_weather_condition_code").isin(14, 15, 16, 21, 22), lit("Snow"))
+#     .when(col("pickup_weather_condition_code").isin(23, 24, 25, 26, 27), lit("Storm"))
+#     .otherwise(lit("Unknown"))
+#     ).groupBy("weather_condition").agg(
+#         spark_round(avg("trip_distance"),3).alias("avg_miles")
+#     ).show(truncate=False)
 
 
 # # # 5. Peak travel hours for each day of the week.
@@ -137,21 +156,21 @@ taxiTrips.withColumn(
 #     .agg(count("*").alias("num_trips"))
 # )
 
-# # Show top 3 peak hours per weekday.
-from pyspark.sql.window import Window
-from pyspark.sql.functions import row_number
+# # # Show top 3 peak hours per weekday.
+# from pyspark.sql.window import Window
+# from pyspark.sql.functions import row_number
 
-trips_by_dow_hour = taxiTrips.withColumn("day_of_week", date_format(col("pickup_time_local"), "EEEE"))\
-    .withColumn("hour_of_day", hour(col("pickup_time_local")))\
-    .groupBy("day_of_week", "hour_of_day")\
-    .agg(count("*").alias("num_trips"))
+# trips_by_dow_hour = taxiTrips.withColumn("day_of_week", date_format(col("pickup_time_local"), "EEEE"))\
+#     .withColumn("hour_of_day", hour(col("pickup_time_local")))\
+#     .groupBy("day_of_week", "hour_of_day")\
+#     .agg(count("*").alias("num_trips"))
 
-peak_window = Window.partitionBy("day_of_week").orderBy(desc("num_trips"))
+# peak_window = Window.partitionBy("day_of_week").orderBy(desc("num_trips"))
 
-trips_by_dow_hour.withColumn("rank", row_number().over(peak_window))\
-    .filter(col("rank") <= 3)\
-    .orderBy("day_of_week", "rank")\
-    .show(truncate=False)
+# trips_by_dow_hour.withColumn("rank", row_number().over(peak_window))\
+#     .filter(col("rank") <= 3)\
+#     .orderBy("day_of_week", "rank")\
+#     .show(truncate=False)
 
 
 
