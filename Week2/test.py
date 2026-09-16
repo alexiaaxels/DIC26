@@ -6,7 +6,10 @@ import sys
 os.environ['PYSPARK_PYTHON'] = sys.executable
 os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
 
-from pyspark.sql.functions import col, date_format, avg, broadcast, when, min, max, count, desc
+from pyspark.sql.functions import (
+    col, date_format, avg, broadcast, when, min, max, count, desc,
+    hour, dayofweek, stddev, lit, round as spark_round
+)
 
 # Resolve paths relative to the repo root so the script works regardless of CWD.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +84,7 @@ taxiTrips = spark.read.format("delta").load(INTEGRATED_TAXI_TRIPS_PATH)
 # The queries should execute directly on the integrated dataset and the underlying Delta tables produced in Week 1.
 
 # ANALYTICAL QUERIES:
+
 # # 1.  Monthly taxi demand for each taxi zone.
 # By month and by taxi zone, show number of trips (or number of customers?) - would say number of trips instead... because 100 cabs being called with 1 person would be more demand than 10 cabs being called with 4 people
 # "Monthly taxi demand", so show for each yyyy-mm OR just group by january, febuary,...
@@ -94,15 +98,57 @@ taxiTrips.withColumn("pickup_month", date_format(col("pickup_date"), "yyyy-MM"))
     .orderBy(desc("num_trips")).show(20, truncate=False)
 
 
+
 # # 2. Average trip distance under different weather conditions.
 
+taxiTrips.withColumn(
+    "weather_condition",
+    when(col("pickup_weather_condition_code") == 1,               lit("Clear"))
+    .when(col("pickup_weather_condition_code") == 2,               lit("Fair"))
+    .when(col("pickup_weather_condition_code") == 3,               lit("Cloudy"))
+    .when(col("pickup_weather_condition_code") == 4,               lit("Overcast"))
+    .when(col("pickup_weather_condition_code").isin(5, 6),         lit("Fog"))
+    .when(col("pickup_weather_condition_code").isin(7, 8, 17, 18), lit("Rain"))
+    .when(col("pickup_weather_condition_code") == 9,               lit("Heavy Rain"))
+    .when(col("pickup_weather_condition_code").isin(10, 11),       lit("Freezing Rain"))
+    .when(col("pickup_weather_condition_code").isin(12, 13, 19, 20), lit("Sleet"))
+    .when(col("pickup_weather_condition_code").isin(14, 15, 16, 21, 22), lit("Snow"))
+    .when(col("pickup_weather_condition_code").isin(23, 24, 25, 26, 27), lit("Storm"))
+    .otherwise(lit("Unknown"))
+    ).groupBy("weather_condition").agg(
+        spark_round(avg("trip_distance"),3).alias("avg_miles")
+    ).show(truncate=False)
 
 
+# # # 5. Peak travel hours for each day of the week.
+# # For each (day_of_week, hour_of_day) count trips, then per day-of-week
+# # rank by trip count.
 
-# # 3. Relationship between air quality and taxi demand.
-# # 4. Taxi zones with the largest variation in demand under different weather conditions.
-# # 5. Peak travel hours for each day of the week.
-# # 6. Monthly trends in taxi demand.
+# trips_by_dow_hour = (
+#     taxiTrips
+#     .withColumn("day_of_week", date_format(col("pickup_time_local"), "EEEE"))
+#     .withColumn("hour_of_day", hour(col("pickup_time_local")))
+#     .groupBy("day_of_week", "hour_of_day")
+#     .agg(count("*").alias("num_trips"))
+# )
+
+# # Show top 3 peak hours per weekday.
+from pyspark.sql.window import Window
+from pyspark.sql.functions import row_number
+
+trips_by_dow_hour = taxiTrips.withColumn("day_of_week", date_format(col("pickup_time_local"), "EEEE"))\
+    .withColumn("hour_of_day", hour(col("pickup_time_local")))\
+    .groupBy("day_of_week", "hour_of_day")\
+    .agg(count("*").alias("num_trips"))
+
+peak_window = Window.partitionBy("day_of_week").orderBy(desc("num_trips"))
+
+trips_by_dow_hour.withColumn("rank", row_number().over(peak_window))\
+    .filter(col("rank") <= 3)\
+    .orderBy("day_of_week", "rank")\
+    .show(truncate=False)
+
+
 
 
 spark.stop()
