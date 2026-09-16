@@ -13,7 +13,7 @@ We recommend using a Python virtual environment such as `.venv`.
 The project consists of several Python scripts, with each script corresponding to a separate task. These should be ran in the order specified below. On Windows systems, you might have to use `python` instead of `python3` to invoke the installed Python version.
 
 ## Run ingestion:
-`python3 task3.py`
+`python3 task3_ingestion.py`
 
 Produces: 4 Delta tables
 - air_quality (`delta/air_quality`)
