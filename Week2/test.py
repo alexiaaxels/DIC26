@@ -83,6 +83,11 @@ taxiTrips = spark.read.format("delta").load(INTEGRATED_TAXI_TRIPS_PATH)
 # Implement all analytical queries using Spark SQL.
 # The queries should execute directly on the integrated dataset and the underlying Delta tables produced in Week 1.
 
+# TODO: NOTE !!!!!!! 
+# This is not the actual format it's supposed to be, I am just trying to see what the query would look like.
+# The correct format is a Spark SQL with spark.sql("SELECT * FROM ...") I think and it should probably be in separate folders so that the queries are runnable independently.
+
+
 # ANALYTICAL QUERIES:
 
 # # 1.  Monthly taxi demand for each taxi zone.
