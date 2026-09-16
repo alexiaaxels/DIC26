@@ -30,18 +30,6 @@ spark = (
 taxiTrips = spark.read.format("delta").load(INTEGRATED_TAXI_TRIPS_PATH)
 
 
-# Implement all analytical queries using Spark SQL.
-# The queries should execute directly on the integrated dataset and the underlying Delta tables produced in Week 1.
-
-# ANALYTICAL QUERIES:
-# # Monthly taxi demand for each taxi zone.
-# By month and by taxi zone, show number of trips (or number of customers?) - would say number of trips instead... because 100 cabs being called with 1 person would be more demand than 10 cabs being called with 4 people
-# "Monthly taxi demand", so show for each yyyy-mm OR just group by january, febuary,...
-# Show how much demand each taxi zone gets monthly
-# Count trips grouped by taxi zone
-# Also, should dropoff_zone be considered as well? 
-
-
 # SCHEMA:
 #  |-- state_code: string (nullable = true)
 #  |-- county_code: string (nullable = true)
@@ -89,25 +77,32 @@ taxiTrips = spark.read.format("delta").load(INTEGRATED_TAXI_TRIPS_PATH)
 #  |-- pickup_date: string (nullable = true)
 
 
-# taxiTrips.withColumn("pickup_month", date_format(col("pickup_date"), "yyyy-MM"))\
-#     .groupBy("pickup_month", "pickup_zone")\
-#     .agg(count("*").alias("num_trips"))\
-#     .orderBy(desc("num_trips")).show(20, truncate=False)
+# Implement all analytical queries using Spark SQL.
+# The queries should execute directly on the integrated dataset and the underlying Delta tables produced in Week 1.
 
-cnt = taxiTrips.count()
+# ANALYTICAL QUERIES:
+# # 1.  Monthly taxi demand for each taxi zone.
+# By month and by taxi zone, show number of trips (or number of customers?) - would say number of trips instead... because 100 cabs being called with 1 person would be more demand than 10 cabs being called with 4 people
+# "Monthly taxi demand", so show for each yyyy-mm OR just group by january, febuary,...
+# Show how much demand each taxi zone gets monthly
+# Count trips grouped by taxi zone
+# Also, should dropoff_zone be considered as well? 
 
-print(cnt)
+taxiTrips.withColumn("pickup_month", date_format(col("pickup_date"), "yyyy-MM"))\
+    .groupBy("pickup_month", "pickup_zone")\
+    .agg(count("*").alias("num_trips"))\
+    .orderBy(desc("num_trips")).show(20, truncate=False)
 
 
-# # Average trip distance under different weather conditions.
+# # 2. Average trip distance under different weather conditions.
 
 
 
 
-# # Relationship between air quality and taxi demand.
-# # Taxi zones with the largest variation in demand under different weather conditions.
-# # Peak travel hours for each day of the week.
-# # Monthly trends in taxi demand.
+# # 3. Relationship between air quality and taxi demand.
+# # 4. Taxi zones with the largest variation in demand under different weather conditions.
+# # 5. Peak travel hours for each day of the week.
+# # 6. Monthly trends in taxi demand.
 
 
 spark.stop()
