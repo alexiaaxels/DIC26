@@ -1,6 +1,6 @@
 from common import get_spark, register_integrated, register_coco_labels
 
-spark = get_spark("q2_weather_and_distance")
+spark = get_spark("q2_distance_by_weather")
 register_integrated(spark)
 register_coco_labels(spark)
 

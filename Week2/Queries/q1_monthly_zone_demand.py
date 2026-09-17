@@ -1,6 +1,6 @@
 from common import get_spark, register_integrated
 
-spark = get_spark("q1_monthly_demand")
+spark = get_spark("q1_monthly_zone_demand")
 register_integrated(spark)
 
 result = spark.sql("""
