@@ -16,6 +16,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir))
 WEEK1_DELTA = os.path.join(REPO_ROOT, "Week1", "delta")
 INTEGRATED_TAXI_TRIPS_PATH = os.path.join(WEEK1_DELTA, "integrated_taxi_trips")
+WEATHER_PATH = os.path.join(WEEK1_DELTA, "weather")
 
 spark = (
     SparkSession.builder
@@ -32,6 +33,10 @@ spark = (
 
 taxiTrips = spark.read.format("delta").load(INTEGRATED_TAXI_TRIPS_PATH)
 
+
+weather = spark.read.format("delta").load(WEATHER_PATH)
+
+weather.show(20, truncate=False)
 
 # TODO: would be nice to extract this spark init stuff to a common shared component, since it will be the same for all the queries
 
@@ -100,20 +105,20 @@ taxiTrips = spark.read.format("delta").load(INTEGRATED_TAXI_TRIPS_PATH)
 # Also, should dropoff_zone be considered as well? 
 
 
-taxiTrips.createOrReplaceTempView("integrated_taxi_trips")
+# taxiTrips.createOrReplaceTempView("integrated_taxi_trips")
 
-something = spark.sql(
-    """
-    select 
-        date_format(pickup_date, 'yyyy-MM') as pickup_month,
-        pickup_zone,
-        count(*) as num_trips
-    from 
-        integrated_taxi_trips
-    group by pickup_month, pickup_zone
-    """)
+# something = spark.sql(
+#     """
+#     select 
+#         date_format(pickup_date, 'yyyy-MM') as pickup_month,
+#         pickup_zone,
+#         count(*) as num_trips
+#     from 
+#         integrated_taxi_trips
+#     group by pickup_month, pickup_zone
+#     """)
 
-something.show()
+# something.show()
 
 
 # taxiTrips.withColumn("pickup_month", date_format(col("pickup_date"), "yyyy-MM"))\

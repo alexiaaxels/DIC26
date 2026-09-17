@@ -1,0 +1,28 @@
+weather_condition,weather_bucket
+Clear,Clear
+Fair,Clear
+Cloudy,Cloudy
+Overcast,Cloudy
+Fog,Fog
+Freezing Fog,Fog
+Light Rain,Rain
+Rain,Rain
+Heavy Rain,Rain
+Rain Shower,Rain
+Heavy Rain Shower,Rain
+Freezing Rain,Rain
+Heavy Freezing Rain,Rain
+Sleet,Snow
+Heavy Sleet,Snow
+Sleet Shower,Snow
+Heavy Sleet Shower,Snow
+Light Snowfall,Snow
+Snowfall,Snow
+Heavy Snowfall,Snow
+Snow Shower,Snow
+Heavy Snow Shower,Snow
+Lightning,Storm
+Hail,Storm
+Thunderstorm,Storm
+Heavy Thunderstorm,Storm
+Storm,Storm
