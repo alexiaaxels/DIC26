@@ -29,8 +29,6 @@ taxi_zone_stats = spark.sql(
 """
 )
 
-taxi_zone_stats.show(truncate=False)
-
 taxi_zone_stats.write.format("delta") \
         .mode("overwrite") \
         .save("week2_delta/taxi_zone_stats")
@@ -58,11 +56,33 @@ air_quality_impact_summary = spark.sql(
 """
 )
 
-air_quality_impact_summary.show(truncate=False)
-
 air_quality_impact_summary.write.format("delta") \
         .mode("overwrite") \
         .save("week2_delta/air_quality_impact_summary")
 
 
 # Borough Mobility Summary
+
+borough_mobility_summary = spark.sql(
+    """
+        select
+            pickup_borough,
+            count(*) as trips,
+            mode(dropoff_borough) as most_common_dropoff_borough,
+            mode(pickup_zone) as most_common_pickup_borough,
+            mode(dropoff_zone) as most_common_dropoff_zone,
+            mode(hour(pickup_time_local)) as most_common_hour,
+            round(avg(passenger_count), 2) as avg_passenger_count_per_trip,
+            mode(date_format(pickup_time_local, 'EEEE')) as busies_week_day
+        from
+            integrated_taxi_trips
+        group by
+            pickup_borough
+        order by
+            trips desc
+"""
+)
+
+borough_mobility_summary.write.format("delta") \
+        .mode("overwrite") \
+        .save("week2_delta/borough_mobility_summary")
