@@ -1,32 +1,24 @@
-from common import get_spark, register_integrated
+from common import get_spark, register_integrated, AIR_QUALITY_CATEGORIES
 
 spark = get_spark("q3_demand_by_air_quality")
 register_integrated(spark)
 
 # # 3. Relationship between air quality and taxi demand.
 
-demand_by_air_quality = spark.sql(
-    """
-    SELECT
-        CASE
-            WHEN pickup_air_quality_pm25 IS NULL THEN 'Unknown'
-            WHEN pickup_air_quality_pm25 <= 9.0 THEN 'Good'
-            WHEN pickup_air_quality_pm25 <= 35.4 THEN 'Moderate'
-            WHEN pickup_air_quality_pm25 <= 55.4 THEN 'Unhealthy for Sensitive'
-            WHEN pickup_air_quality_pm25 <= 125.4 THEN 'Unhealthy'
-            WHEN pickup_air_quality_pm25 <= 225.4 THEN 'Very Unhealthy'
-            ELSE 'Hazardous'
-        END AS air_quality_category,
-        COUNT(*) AS trips,
-        COUNT(DISTINCT time_utc) AS hours_observed,
-        ROUND(COUNT(*) / COUNT(DISTINCT time_utc), 2) AS avg_trips_per_hour
-    FROM
+result = spark.sql(
+    f"""
+    select
+        {AIR_QUALITY_CATEGORIES} as air_quality_category,
+        count(*) as trips,
+        count(distinct time_utc) as hours_observed,
+        round(count(*) / count(distinct time_utc), 2) as avg_trips_per_hour
+    from
         integrated_taxi_trips
-    GROUP BY
+    group by
         air_quality_category
-    ORDER BY
-        avg_trips_per_hour DESC 
+    order by
+        avg_trips_per_hour desc 
 """
 )
 
-demand_by_air_quality.show(truncate=False)
+result.show(truncate=False)

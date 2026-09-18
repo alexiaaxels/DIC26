@@ -8,37 +8,37 @@ register_coco_labels(spark)
 
 zone_weather_variation = spark.sql(
     """
-        SELECT
+        select
             pickup_zone,
-            l.weather_bucket AS weather_condition,
-            COUNT(*) AS trips
-        FROM 
+            l.weather_bucket as weather_condition,
+            count(*) as trips
+        from 
             integrated_taxi_trips t
             left join raw_coco_labels r on t.pickup_weather_condition_code = r.coco
             left join coco_buckets l on r.weather_condition = l.weather_condition
-        GROUP BY
+        group by
             pickup_zone, l.weather_bucket
 """
 )
 
 zone_weather_variation.createOrReplaceTempView("zone_weather_demand")
 
-largest_variation = spark.sql(
+result = spark.sql(
     """
-        SELECT
+        select
             pickup_zone,
-            ROUND(AVG(trips), 2) AS avg_trips_per_condition,
-            ROUND(STDDEV(trips), 2) AS stddev_trips,
-            ROUND((STDDEV(trips) / AVG(trips))*100, 2) AS coeff_of_variation
-        FROM
+            round(avg(trips), 2) as avg_trips_per_condition,
+            round(stddev(trips), 2) as stddev_trips,
+            round((stddev(trips) / avg(trips))*100, 2) as coeff_of_variation
+        from
             zone_weather_demand
-        GROUP BY
+        group by
             pickup_zone
-        ORDER BY
-            coeff_of_variation DESC
+        order by
+            coeff_of_variation desc
 """
 )
 
-largest_variation.show(truncate=False)
+result.show(truncate=False)
 
 spark.stop()

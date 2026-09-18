@@ -60,3 +60,16 @@ def register_coco_labels(spark: SparkSession):
     buckets.createOrReplaceTempView("coco_buckets")
 
     return raw, buckets
+
+
+AIR_QUALITY_CATEGORIES = """
+    case
+        when pickup_air_quality_pm25 is null then 'Unknown'
+        when pickup_air_quality_pm25 <= 9.0 then 'Good'
+        when pickup_air_quality_pm25 <= 35.4 then 'Moderate'
+        when pickup_air_quality_pm25 <= 55.4 then 'Unhealthy for Sensitive'
+        when pickup_air_quality_pm25 <= 125.4 then 'Unhealthy'
+        when pickup_air_quality_pm25 <= 225.4 then 'Very Unhealthy'
+        else 'Hazardous'
+    end
+"""
