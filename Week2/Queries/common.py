@@ -1,16 +1,19 @@
 
 import os
 import sys
+from datetime import datetime, timezone
 
 os.environ["PYSPARK_PYTHON"] = sys.executable
 os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import lit, current_timestamp
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir))
 WEEK1_DELTA = os.path.join(REPO_ROOT, "Week1", "delta")
+WEEK2_DELTA = os.path.join(REPO_ROOT, "Week2", "delta")
 
 INTEGRATED_TAXI_TRIPS_PATH = os.path.join(WEEK1_DELTA, "integrated_taxi_trips")
 
@@ -18,6 +21,8 @@ INTEGRATED_TAXI_TRIPS_PATH = os.path.join(WEEK1_DELTA, "integrated_taxi_trips")
 RAW_COCO_LABELS_CSV = os.path.join(SCRIPT_DIR, "raw_coco_labels.csv")
 
 COCO_BUCKETS_CSV    = os.path.join(SCRIPT_DIR, "coco_buckets.csv")
+
+METADATA_PATH = os.path.join(WEEK2_DELTA, "data_products_metadata")
 
 
 def get_spark(app_name: str) -> SparkSession:
@@ -37,6 +42,7 @@ def get_spark(app_name: str) -> SparkSession:
 
 def register_integrated(spark: SparkSession, view_name: str = "integrated_taxi_trips"):
     df = spark.read.format("delta").load(INTEGRATED_TAXI_TRIPS_PATH)
+    df.cache()
     df.createOrReplaceTempView(view_name)
     return df
 
@@ -73,3 +79,35 @@ AIR_QUALITY_CATEGORIES = """
         else 'Hazardous'
     end
 """
+
+def data_product_metadata(df, source: str, schema_version: str = "1.0"):
+    return df \
+        .withColumn("data_source", lit(source)) \
+    .withColumn("schema_version", lit(schema_version)) \
+    .withColumn("generated_at", current_timestamp())
+
+def existing_metadata(spark: SparkSession, table_name: str):
+    if not os.path.exists(METADATA_PATH):
+        return None
+    metadata = spark.read.format("delta").load(METADATA_PATH)
+    row = metadata.filter(metadata.table_name == table_name).select("created_at").collect()
+    return row[0]["created_at"] if row else None
+
+    
+def data_product_metadata(spark: SparkSession, metadata_rows: list, table_name: str, source: str, schema_version: str = "1.0"):
+    now = datetime.now(timezone.utc).isoformat()
+    metadata_rows.append({
+        "table_name": table_name,
+        "data_source": source,
+        "schema_version": schema_version,
+        "created_at": existing_metadata(spark, table_name) or now,
+        "refresh_at": now
+    })
+
+def create_metadata(spark: SparkSession, metadata_rows: list):
+    spark.createDataFrame(metadata_rows).write.format("delta").mode("overwrite").save(METADATA_PATH)
+
+def create_dt(df, table_name: str):
+    return df.write.format("delta") \
+        .mode("overwrite") \
+        .save(os.path.join(WEEK2_DELTA, table_name))
