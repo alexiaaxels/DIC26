@@ -36,6 +36,25 @@ OPTION2 = """
     order by miles desc
 """
 
+def run_broadcast(spark): #only OPTION1
+    register_integrated(spark)
+    register_coco_labels(spark)
+
+    ##new query with broadcast hint(?)
+    return spark.sql("""
+        SELECT /*+ BROADCAST(r), BROADCAST(l) */
+            l.weather_bucket AS weather,
+            ROUND(AVG(t.trip_distance), 2) AS miles,
+            COUNT(*) AS trips
+        FROM integrated_taxi_trips t
+        LEFT JOIN raw_coco_labels r
+            ON t.pickup_weather_condition_code = r.coco
+        LEFT JOIN coco_buckets l
+            ON r.weather_condition = l.weather_condition
+        GROUP BY l.weather_bucket
+        ORDER BY miles DESC
+    """)
+
 if __name__ == "__main__":
     spark = get_spark("q2_distance_by_weather")
     register_integrated(spark)

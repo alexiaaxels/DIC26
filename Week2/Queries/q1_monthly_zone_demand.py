@@ -8,7 +8,7 @@ def run(spark):
             count(*) as num_trips
         from integrated_taxi_trips
         group by pickup_month, pickup_zone
-        order by num_trips desc
+        order by num_trips desc, pickup_month, pickup_zone
     """)
     return result
 
