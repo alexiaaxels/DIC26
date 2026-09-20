@@ -49,6 +49,9 @@ if __name__ == "__main__":
 
     print("\n===OPTIMIZATION STRATEGY 1: CACHING===")
 
+    #warmup
+    query1(spark).collect()
+
     ##RUN NON-CACHED FIRST
     spark.catalog.clearCache()
     uncached_results, uncached_time = run_all_queries(spark)
@@ -147,7 +150,7 @@ if __name__ == "__main__":
     ##NON-AQE
     spark.conf.set("spark.sql.adaptive.enabled", "false")
 
-    query1(spark).explain("formatted")
+    #query1(spark).explain("formatted")
 
     start = time.perf_counter()
     result_off = query1(spark).collect()
@@ -163,15 +166,17 @@ if __name__ == "__main__":
     ##AQE
     spark.conf.set("spark.sql.adaptive.enabled", "true")
 
-    query1(spark).explain("formatted")
+    #query1(spark).explain("formatted")
 
     start = time.perf_counter()
-    result_on = query1(spark).collect()
+    query_on = query1(spark)
+    result_on = query_on.collect()
     time_on = time.perf_counter() - start
 
     print(f"\nAQE ON:  {time_on:.2f} seconds")
 
     query1(spark).explain("formatted")
+    print(query_on._jdf.queryExecution().executedPlan().toString())
 
     if result_off == result_on:
         print("\nResults are identical.")
