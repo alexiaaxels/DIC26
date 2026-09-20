@@ -6,6 +6,7 @@ To run the project, you will need:
 - Python 3
 - PySpark 4.0.4
 - Delta Lake 4.0.0
+- the Delta tables created in Week 1
 
 We recommend using a Python virtual environment such as `.venv`.
 
@@ -18,8 +19,10 @@ Note: On Windows systems, you might have to use `python` instead of `python3` to
 Each query can be run independently:
 
 `python3 task2_queries/q1_monthly_zone_demand.py`
+
 `python3 task2_queries/q2_distance_by_weather.py`
-...and similarly for q3–q6
+
+...and similarly for q3-q6
 
 Each script executes the query against the integrated Delta dataset and prints the resulting table to the console.
 
