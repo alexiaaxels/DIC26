@@ -8,10 +8,11 @@ os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import lit, current_timestamp
+from pyspark.errors.exceptions.captured import AnalysisException
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir))
+REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir))
 WEEK1_DELTA = os.path.join(REPO_ROOT, "Week1", "delta")
 WEEK2_DELTA = os.path.join(REPO_ROOT, "Week2", "delta")
 
@@ -87,9 +88,9 @@ def data_product_metadata(df, source: str, schema_version: str = "1.0"):
     .withColumn("generated_at", current_timestamp())
 
 def existing_metadata(spark: SparkSession, table_name: str):
-    if not os.path.exists(METADATA_PATH):
+    try: metadata = spark.read.format("delta").load(METADATA_PATH)
+    except AnalysisException:
         return None
-    metadata = spark.read.format("delta").load(METADATA_PATH)
     row = metadata.filter(metadata.table_name == table_name).select("created_at").collect()
     return row[0]["created_at"] if row else None
 

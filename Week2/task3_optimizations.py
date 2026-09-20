@@ -2,14 +2,14 @@ import time
 
 from common import get_spark, register_integrated
 
-from q1_monthly_zone_demand import run as query1
-from q2_distance_by_weather import run as query2
-from q2_distance_by_weather import run_broadcast as query2_broadcast
-from q3_demand_by_air_quality import run as query3
-from q4_weather_and_zone_variation import run as query4
-from q5_dow_peak_hours import run as query5
-from q6_monthly_demand_trends import run as query6
-from q6_monthly_demand_trends import run_simple as query6_simple
+from task2_queries.q1_monthly_zone_demand import run as query1
+from task2_queries.q2_distance_by_weather import run as query2
+from task2_queries.q2_distance_by_weather import run_broadcast as query2_broadcast
+from task2_queries.q3_demand_by_air_quality import run as query3
+from task2_queries.q4_weather_and_zone_variation import run as query4
+from task2_queries.q5_dow_peak_hours import run as query5
+from task2_queries.q6_monthly_demand_trends import run as query6
+from task2_queries.q6_monthly_demand_trends import run_simple as query6_simple
 
 queries = [
     ("Query 1", query1),
