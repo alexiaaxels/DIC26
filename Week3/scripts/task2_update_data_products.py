@@ -30,7 +30,7 @@ from Week2.task4_data_products import (
 )
 
 
-spark = get_spark("task4_data_products_refresh")
+spark = get_spark("task2_update_data_products")
 
 register_integrated(spark)
 
@@ -50,7 +50,6 @@ latest_source_time = max(
     if dataset_info["inserted"] > 0
 )
 
-# Read the existing product metadata
 try:
     metadata = (
         spark.read
