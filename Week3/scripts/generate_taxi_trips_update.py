@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import os
-import random
 from datetime import timedelta
 
 from pyspark.sql import DataFrame
-from pyspark.sql.functions import (
-    col, expr, lit, rand, row_number
-)
-from pyspark.sql.window import Window
+from pyspark.sql.functions import expr, rand
+from pyspark.sql.types import DoubleType, LongType
 
 from common import (
     RANDOM_SEED,
@@ -18,8 +15,15 @@ from common import (
     get_spark,
 )
 
-NEW_FRACTION = 0.07  # 7% new trips (project asks for 5-10% new taxi trips)
-DUPLICATE_FRACTION = 0.015  # ~1.5% duplicates
+NEW_FRACTION = 0.07
+DUPLICATE_FRACTION = 0.015
+
+DENSITY_MATCH = True
+
+FARE_JITTER_PCT = 0.05
+DISTANCE_JITTER_PCT = 0.10
+PASSENGER_JITTER_PROB = 0.20
+
 
 def _load_raw(spark) -> DataFrame:
     missing = [p for p in TAXI_TRIPS_RAW_PATHS if not os.path.exists(p)]
@@ -38,38 +42,82 @@ def generate() -> dict:
     raw = _load_raw(spark).cache()
     raw_count = raw.count()
 
-    max_pickup = raw.selectExpr("max(tpep_pickup_datetime) as m").collect()[0]["m"]
-    if max_pickup is None:
-        raise RuntimeError("Could not compute max pickup time from raw taxi data.")
+    minmax = raw.selectExpr(
+        "min(tpep_pickup_datetime) as lo",
+        "max(tpep_pickup_datetime) as hi",
+    ).collect()[0]
+    min_pickup = minmax["lo"]
+    max_pickup = minmax["hi"]
+    if min_pickup is None or max_pickup is None:
+        raise RuntimeError("Could not compute pickup-time bounds from raw taxi data.")
 
-    window_seconds = 30 * 24 * 3600
+    original_span_s = int((max_pickup - min_pickup).total_seconds())
 
-    seconds_from_original_min_to_max_offset = (
-        max_pickup + timedelta(seconds=1)
-    )
+    if DENSITY_MATCH:
+        window_seconds = int(original_span_s * NEW_FRACTION)
+    else:
+        window_seconds = 30 * 24 * 3600
 
-    new_sample = raw.sample(False, NEW_FRACTION, seed=RANDOM_SEED)
+    new_sample = raw.sample(withReplacement=False,
+                            fraction=NEW_FRACTION,
+                            seed=RANDOM_SEED)
 
     sample_min = new_sample.selectExpr("min(tpep_pickup_datetime) as m").collect()[0]["m"]
     if sample_min is None:
-        sample_min = raw.selectExpr("min(tpep_pickup_datetime) as m").collect()[0]["m"]
-    delta_seconds = int(
-        (seconds_from_original_min_to_max_offset - sample_min).total_seconds()
-    )
+        sample_min = min_pickup
 
-    shift_expr = f"make_interval(0,0,0,0,0,0,{delta_seconds})" # make_interval(Y,M,W,D,H,M,S)
+    target_start = max_pickup + timedelta(seconds=1)
+    delta_seconds = int((target_start - sample_min).total_seconds())
+    base_shift = f"make_interval(0,0,0,0,0,0,{delta_seconds})"
+
     new_trips = (
         new_sample
-        .withColumn("_jitter_s", (rand(seed=RANDOM_SEED + 1) * window_seconds).cast("long"))
+        .withColumn(
+            "_jitter_s",
+            (rand(seed=RANDOM_SEED + 1) * window_seconds).cast(LongType()),
+        )
         .withColumn(
             "tpep_pickup_datetime",
-            expr(f"tpep_pickup_datetime + {shift_expr} + make_interval(0,0,0,0,0,0,_jitter_s)"),
+            expr(
+                f"tpep_pickup_datetime + {base_shift} "
+                f"+ make_interval(0,0,0,0,0,0,_jitter_s)"
+            ),
         )
         .withColumn(
             "tpep_dropoff_datetime",
-            expr(f"tpep_dropoff_datetime + {shift_expr} + make_interval(0,0,0,0,0,0,_jitter_s)"),
+            expr(
+                f"tpep_dropoff_datetime + {base_shift} "
+                f"+ make_interval(0,0,0,0,0,0,_jitter_s)"
+            ),
         )
         .drop("_jitter_s")
+    )
+
+    fj = FARE_JITTER_PCT
+    dj = DISTANCE_JITTER_PCT
+    pj = PASSENGER_JITTER_PROB
+
+    new_trips = (
+        new_trips
+        .withColumn(
+            "fare_amount",
+            (expr(f"fare_amount * (1 + (rand({RANDOM_SEED + 3}) * 2 - 1) * {fj})"))
+            .cast(DoubleType()),
+        )
+        .withColumn(
+            "trip_distance",
+            (expr(f"trip_distance * (1 + (rand({RANDOM_SEED + 4}) * 2 - 1) * {dj})"))
+            .cast(DoubleType()),
+        )
+        .withColumn(
+            "passenger_count",
+            expr(
+                f"greatest(1, passenger_count + "
+                f"case when rand({RANDOM_SEED + 5}) < {pj} "
+                f"then case when rand({RANDOM_SEED + 6}) < 0.5 then -1 else 1 end "
+                f"else 0 end)"
+            ).cast(LongType()),
+        )
     )
     new_count = new_trips.count()
 
@@ -85,7 +133,6 @@ def generate() -> dict:
         .write.mode("overwrite")
         .parquet(tmp_out)
     )
-
     part_files = [f for f in os.listdir(tmp_out) if f.endswith(".parquet")]
     if len(part_files) != 1:
         raise RuntimeError(f"Expected one part file, found {part_files}")
@@ -93,7 +140,6 @@ def generate() -> dict:
     if os.path.exists(TAXI_TRIPS_UPDATE_PATH):
         os.remove(TAXI_TRIPS_UPDATE_PATH)
     os.replace(final_src, TAXI_TRIPS_UPDATE_PATH)
-
     for f in os.listdir(tmp_out):
         os.remove(os.path.join(tmp_out, f))
     os.rmdir(tmp_out)
@@ -103,17 +149,27 @@ def generate() -> dict:
         "format": "parquet",
         "output_path": os.path.relpath(TAXI_TRIPS_UPDATE_PATH),
         "original_row_count": raw_count,
+        "original_min_pickup": min_pickup.isoformat(),
         "original_max_pickup": max_pickup.isoformat(),
+        "original_span_days": round(original_span_s / 86400, 2),
+        "new_window_days": round(window_seconds / 86400, 2),
         "new_records": new_count,
         "duplicate_records": dup_count,
         "total_records_in_file": new_count + dup_count,
         "new_fraction": NEW_FRACTION,
         "duplicate_fraction": DUPLICATE_FRACTION,
+        "fare_jitter_pct": FARE_JITTER_PCT,
+        "distance_jitter_pct": DISTANCE_JITTER_PCT,
+        "passenger_jitter_prob": PASSENGER_JITTER_PROB,
         "schema_changes": [],
         "notes": (
-            "New trips are sampled from the original data and time-shifted to "
-            "the month following the original max pickup time. Duplicates are "
-            "verbatim rows from the original dataset."
+            "New trips are sampled from the original data, time-shifted so "
+            "the earliest new pickup falls one second after the original "
+            "max pickup, and jittered across a window whose width equals "
+            "NEW_FRACTION * original_span (density-preserving). Fare, "
+            "distance and passenger_count are perturbed so trips are "
+            "similar but distinct. Duplicates are verbatim rows from the "
+            "original dataset."
         ),
     }
 
@@ -126,3 +182,4 @@ if __name__ == "__main__":
     print("taxi_trips update generated:")
     for k, v in m.items():
         print(f"  {k}: {v}")
+

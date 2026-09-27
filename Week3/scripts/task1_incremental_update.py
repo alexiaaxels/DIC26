@@ -8,10 +8,22 @@ import time
 import uuid
 from datetime import datetime, timezone
 from monitoring import log_run
+from quarantine import (
+    log_validation_metrics,
+    rejects_path,
+    write_rejects,
+    write_validation_report,
+)
+from validation import (
+    SchemaContractError,
+    SchemaContractRule,
+    Validator,
+    rules_for_dataset,
+)
 
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col
+from pyspark.sql.functions import lit
 
 _WEEK1_SCRIPTS = os.path.abspath(
     os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, "Week1")
@@ -32,6 +44,7 @@ from common import (  # noqa: E402
     WEATHER_UPDATE_PATH,
     get_spark,
 )
+from validation_rules import EXTRA_RULES
 
 
 DATASETS = {
@@ -66,27 +79,6 @@ def _standardize_column_names(df: DataFrame) -> DataFrame:
     return df
 
 
-def _validate_schema(df: DataFrame, config: dict, dataset: str) -> None:
-    missing = config["expected_cols"] - set(c.lower() for c in df.columns)
-    if missing:
-        raise ValueError(
-            f"[{dataset}] update file is missing expected columns: {missing}"
-        )
-
-
-def _numeric_range_filter(df: DataFrame, config: dict) -> tuple[DataFrame, int]:
-    before = df.count()
-    for field, (lo, hi) in config["numeric_checks"].items():
-        if field not in df.columns:
-            continue
-        if lo is not None:
-            df = df.filter((col(field) >= lo) | col(field).isNull())
-        if hi is not None:
-            df = df.filter((col(field) <= hi) | col(field).isNull())
-    rejected = before - df.count()
-    return df, rejected
-
-
 def _load_update(spark: SparkSession, dataset: str) -> DataFrame:
     info = DATASETS[dataset]
     path = info["update_path"]
@@ -102,30 +94,44 @@ def _load_update(spark: SparkSession, dataset: str) -> DataFrame:
     raise ValueError(f"Unsupported update format: {info['format']}")
 
 
-def _prepare(spark: SparkSession, dataset: str) -> tuple[DataFrame, int, int]:
+def _prepare(
+    spark: SparkSession, dataset: str
+) -> tuple[DataFrame, DataFrame, list[dict], bool]:
     config = DATASET_CONFIGS[dataset]
+
     df = _load_update(spark, dataset)
     df = _standardize_column_names(df)
-    _validate_schema(df, config, dataset)
+
+    schema_rule = SchemaContractRule(
+        required=config["expected_cols"],
+        known_optional=config.get("optional_cols", set()),
+    )
+    contract_result = schema_rule.apply(df)
+    contract_metric = contract_result.metrics
+    if contract_metric.get("hard_failure"):
+        empty_rejected = (
+            df.limit(0)
+              .withColumn("_rule_id", lit(schema_rule.rule_id))
+              .withColumn("_reject_reason", lit(contract_metric.get("reason", "")))
+        )
+        return df.limit(0), empty_rejected, [contract_metric], True
 
     if config["timestamp_builder"]:
         df = config["timestamp_builder"](df)
     if config["transform"]:
         df = config["transform"](df)
 
-    total_after_transform = df.count()
+    effective_config = dict(config)
+    effective_config["extra_rules"] = EXTRA_RULES.get(dataset, [])
+    all_rules = rules_for_dataset(effective_config)
+    row_rules = [r for r in all_rules if r.rule_type != "schema_contract"]
 
-    key_cols = config["key_cols"]
-    df_nonull = df.dropna(subset=key_cols)
-    key_nulls = total_after_transform - df_nonull.count()
+    validator = Validator(row_rules)
+    outcome = validator.run(df, dataset)
 
-    df_dedup = df_nonull.dropDuplicates(key_cols)
-    duplicates_in_file = df_nonull.count() - df_dedup.count()
+    per_rule_metrics = [contract_metric] + outcome.per_rule_metrics
 
-    df_valid, range_rejected = _numeric_range_filter(df_dedup, config)
-    rejected_invalid = key_nulls + range_rejected
-
-    return df_valid, rejected_invalid, duplicates_in_file
+    return outcome.passed, outcome.rejected, per_rule_metrics, False
 
 
 def _merge_condition(key_cols: list[str]) -> str:
@@ -167,18 +173,108 @@ def _merge(spark: SparkSession, dataset: str, updates: DataFrame) -> dict:
         "duplicates_ignored_vs_target": duplicates_ignored,
     }
 
-def _apply(spark: SparkSession, dataset: str) -> dict:
+def _summarise_rule_metrics(metrics: list[dict]) -> dict:
+    """Roll per-rule counts up into the legacy metric names used by the
+    monitoring table and the Task 2 refresh pipeline."""
+    rejected_invalid = 0
+    duplicates_in_file = 0
+    for m in metrics:
+        if m.get("hard_failure"):
+            # Schema hard failure: treat the whole batch as invalid.
+            return {
+                "rejected_invalid_records": int(m.get("rows_in", 0)),
+                "intra_file_duplicate_records": 0,
+            }
+        rtype = m.get("rule_type")
+        failed = int(m.get("rows_failed", 0))
+        if rtype == "duplicate":
+            duplicates_in_file += failed
+        elif rtype in ("schema_contract",):
+            # Soft failure or "unexpected extras" — no row rejections.
+            continue
+        else:
+            rejected_invalid += failed
+    return {
+        "rejected_invalid_records": rejected_invalid,
+        "intra_file_duplicate_records": duplicates_in_file,
+    }
+
+
+def _apply(
+    spark: SparkSession, dataset: str, run_id: str
+) -> dict:
     started_at = time.time()
-    updates, rejected_invalid, duplicates_in_file = _prepare(spark, dataset)
+
+    try:
+        passed, rejected, per_rule_metrics, hard_failure = _prepare(spark, dataset)
+    except SchemaContractError as e:
+        elapsed = round(time.time() - started_at, 2)
+        return {
+            "dataset": dataset,
+            "update_file": os.path.relpath(DATASETS[dataset]["update_path"]),
+            "delta_table": os.path.relpath(DATASETS[dataset]["delta_path"]),
+            "hard_failure": True,
+            "hard_failure_reason": str(e),
+            "rejected_invalid_records": 0,
+            "intra_file_duplicate_records": 0,
+            "schema_columns_added_from_update": [],
+            "schema_evolved_on_target": [],
+            "per_rule_metrics": [],
+            "execution_time_s": elapsed,
+            "executed_at": datetime.now(timezone.utc).isoformat(),
+            "processed_records": 0,
+            "validation_failures": 0,
+            "schema_version": DATASET_CONFIGS[dataset]["schema_version"],
+            "rows_before": None,
+            "rows_after": None,
+            "update_rows_considered": 0,
+            "inserted": 0,
+            "duplicates_ignored_vs_target": 0,
+            "run_id": run_id,
+        }
 
     delta_path = DATASETS[dataset]["delta_path"]
     target_schema_before = set(
         spark.read.format("delta").load(delta_path).columns
     )
-    update_schema = set(updates.columns)
+    update_schema = set(passed.columns)
     added_columns = sorted(update_schema - target_schema_before)
 
-    merge_stats = _merge(spark, dataset, updates)
+    quarantined = write_rejects(rejected, dataset, run_id)
+
+    if hard_failure:
+        elapsed = round(time.time() - started_at, 2)
+        summary = _summarise_rule_metrics(per_rule_metrics)
+        base_version = DATASET_CONFIGS[dataset]["schema_version"].split(".")[0]
+        return {
+            "dataset": dataset,
+            "update_file": os.path.relpath(DATASETS[dataset]["update_path"]),
+            "delta_table": os.path.relpath(delta_path),
+            "hard_failure": True,
+            "hard_failure_reason": next(
+                (m.get("reason") for m in per_rule_metrics if m.get("hard_failure")),
+                "unspecified schema-contract failure",
+            ),
+            "rejected_invalid_records": summary["rejected_invalid_records"],
+            "intra_file_duplicate_records": summary["intra_file_duplicate_records"],
+            "quarantined_records": quarantined,
+            "schema_columns_added_from_update": [],
+            "schema_evolved_on_target": [],
+            "per_rule_metrics": per_rule_metrics,
+            "execution_time_s": elapsed,
+            "executed_at": datetime.now(timezone.utc).isoformat(),
+            "processed_records": 0,
+            "validation_failures": summary["rejected_invalid_records"] + summary["intra_file_duplicate_records"],
+            "schema_version": f"{base_version}.0",
+            "rows_before": None,
+            "rows_after": None,
+            "update_rows_considered": 0,
+            "inserted": 0,
+            "duplicates_ignored_vs_target": 0,
+            "run_id": run_id,
+        }
+
+    merge_stats = _merge(spark, dataset, passed)
 
     target_schema_after = set(
         spark.read.format("delta").load(delta_path).columns
@@ -192,20 +288,29 @@ def _apply(spark: SparkSession, dataset: str) -> dict:
     base_version = DATASET_CONFIGS[dataset]["schema_version"].split(".")[0]
     schema_version = f"{base_version}.{len(columns_added)}"
 
+    summary = _summarise_rule_metrics(per_rule_metrics)
+
     return {
         "dataset": dataset,
         "update_file": os.path.relpath(DATASETS[dataset]["update_path"]),
         "delta_table": os.path.relpath(delta_path),
-        "rejected_invalid_records": rejected_invalid,
-        "intra_file_duplicate_records": duplicates_in_file,
+        "hard_failure": False,
+        "rejected_invalid_records": summary["rejected_invalid_records"],
+        "intra_file_duplicate_records": summary["intra_file_duplicate_records"],
+        "quarantined_records": quarantined,
         "schema_columns_added_from_update": added_columns,
         "schema_evolved_on_target": schema_evolved,
+        "per_rule_metrics": per_rule_metrics,
         "execution_time_s": round(time.time() - started_at, 2),
         "executed_at": datetime.now(timezone.utc).isoformat(),
-        "processed_records": merge_stats["update_rows_considered"] + rejected_invalid + duplicates_in_file,
-        "validation_failures": rejected_invalid + duplicates_in_file,
+        "processed_records": merge_stats["update_rows_considered"]
+        + summary["rejected_invalid_records"]
+        + summary["intra_file_duplicate_records"],
+        "validation_failures": summary["rejected_invalid_records"]
+        + summary["intra_file_duplicate_records"],
         "schema_version": schema_version,
         **merge_stats,
+        "run_id": run_id,
     }
 
 
@@ -232,25 +337,66 @@ def main(argv: list[str]) -> int:
 
     spark = get_spark("Week3 Task1 - incremental update pipeline")
 
+    run_id = str(uuid.uuid4())
     report = {
-        "run_id": str(uuid.uuid4()),
+        "run_id": run_id,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "datasets_requested": selected,
         "datasets": {},
     }
 
+    validation_report = {
+        "run_id": run_id,
+        "started_at": report["started_at"],
+        "datasets": {},
+    }
+
     for name in selected:
         print(f"\n=== Applying incremental update for {name} ===")
-        stats = _apply(spark, name)
+        stats = _apply(spark, name, run_id)
         log_run(spark, "task1_incremental_update", stats, stats["schema_version"])
-        report["datasets"][name] = stats
-        for k, v in stats.items():
+        log_validation_metrics(
+            spark,
+            run_id=run_id,
+            dataset=name,
+            per_rule_metrics=stats.get("per_rule_metrics", []),
+            schema_version=stats["schema_version"],
+        )
+
+        validation_report["datasets"][name] = {
+            "hard_failure": stats.get("hard_failure", False),
+            "hard_failure_reason": stats.get("hard_failure_reason"),
+            "rejected_invalid_records": stats["rejected_invalid_records"],
+            "intra_file_duplicate_records": stats["intra_file_duplicate_records"],
+            "quarantined_records": stats.get("quarantined_records", 0),
+            "quarantine_path": os.path.relpath(rejects_path(name)),
+            "per_rule_metrics": stats.get("per_rule_metrics", []),
+        }
+        stats_for_log = {k: v for k, v in stats.items() if k != "per_rule_metrics"}
+        report["datasets"][name] = stats_for_log
+
+        for k, v in stats_for_log.items():
             print(f"  {k}: {v}")
+        if stats.get("per_rule_metrics"):
+            print("  per_rule_metrics:")
+            for m in stats["per_rule_metrics"]:
+                print(
+                    f"    - {m.get('rule_id')} "
+                    f"({m.get('rule_type')}): "
+                    f"in={m.get('rows_in')} "
+                    f"failed={m.get('rows_failed')} "
+                    f"in {m.get('elapsed_s')}s"
+                )
 
     report["finished_at"] = datetime.now(timezone.utc).isoformat()
+    validation_report["finished_at"] = report["finished_at"]
+
     latest_path, history_path = _write_run_report(report)
-    print(f"\nLatest run written to  {latest_path}")
-    print(f"History appended to    {history_path}")
+    validation_report_path = write_validation_report(run_id, validation_report)
+
+    print(f"\nLatest run written to     {latest_path}")
+    print(f"History appended to       {history_path}")
+    print(f"Validation report at      {validation_report_path}")
 
     spark.stop()
     return 0
