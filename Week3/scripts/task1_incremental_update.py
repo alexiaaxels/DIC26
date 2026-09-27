@@ -6,6 +6,7 @@ import re
 import sys
 import time
 from datetime import datetime, timezone
+from monitoring import log_run
 
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
@@ -181,6 +182,13 @@ def _apply(spark: SparkSession, dataset: str) -> dict:
     )
     schema_evolved = sorted(target_schema_after - target_schema_before)
 
+    original_columns = set(
+        spark.read.format("delta").option("versionAsOf", 0).load(delta_path).columns
+    )
+    columns_added = sorted(target_schema_after - original_columns)
+    base_version = DATASET_CONFIGS[dataset]["schema_version"].split(".")[0]
+    schema_version = f"{base_version}.{len(columns_added)}"
+
     return {
         "dataset": dataset,
         "update_file": os.path.relpath(DATASETS[dataset]["update_path"]),
@@ -191,6 +199,9 @@ def _apply(spark: SparkSession, dataset: str) -> dict:
         "schema_evolved_on_target": schema_evolved,
         "execution_time_s": round(time.time() - started_at, 2),
         "executed_at": datetime.now(timezone.utc).isoformat(),
+        "processed_records": merge_stats["update_rows_considered"] + rejected_invalid + duplicates_in_file,
+        "validation_failures": rejected_invalid + duplicates_in_file,
+        "schema_version": schema_version,
         **merge_stats,
     }
 
@@ -221,6 +232,7 @@ def main(argv: list[str]) -> int:
     for name in selected:
         print(f"\n=== Applying incremental update for {name} ===")
         stats = _apply(spark, name)
+        log_run(spark, "task1_incremental_update", stats, stats["schema_version"])
         report["datasets"][name] = stats
         for k, v in stats.items():
             print(f"  {k}: {v}")
