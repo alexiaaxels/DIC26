@@ -33,4 +33,3 @@ To run the pipeline on all datasets:
 To run a subset:
 `python3 scripts/task1_incremental_update.py taxi_trips`
 `python3 scripts/task1_incremental_update.py weather air_quality`
-

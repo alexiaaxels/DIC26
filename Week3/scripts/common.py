@@ -18,6 +18,8 @@ WEEK1_DATA = os.path.join(WEEK1_DIR, "Data")
 
 UPDATES_DIR = os.path.join(WEEK3_DIR, "Data", "updates")
 UPDATE_MANIFEST_PATH = os.path.join(UPDATES_DIR, "manifest.json")
+INCREMENTAL_REPORT_PATH = os.path.join(UPDATES_DIR, "incremental_run_report.json")
+INCREMENTAL_HISTORY_PATH = os.path.join(UPDATES_DIR, "incremental_run_history.jsonl")
 
 TAXI_TRIPS_RAW_PATHS = [
     os.path.join(WEEK1_DATA, "yellow_tripdata_2024-01.parquet"),
@@ -43,7 +45,8 @@ def get_spark(app_name: str) -> SparkSession:
         .master("local[*]")
         .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
-        .config("spark.driver.memory", "4g")
+        .config("spark.driver.memory", "6g")
+        .config("spark.sql.autoBroadcastJoinThreshold", 10 * 1024 * 1024)
         .config("spark.jars.packages", "io.delta:delta-spark_2.13:4.0.0")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
         .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")

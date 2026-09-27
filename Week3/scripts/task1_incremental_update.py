@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 
 from delta.tables import DeltaTable
@@ -21,6 +22,8 @@ from data_config import DATASET_CONFIGS
 from common import (  # noqa: E402
     AIR_QUALITY_DELTA,
     AIR_QUALITY_UPDATE_PATH,
+    INCREMENTAL_HISTORY_PATH,
+    INCREMENTAL_REPORT_PATH,
     TAXI_TRIPS_DELTA,
     TAXI_TRIPS_UPDATE_PATH,
     UPDATES_DIR,
@@ -195,12 +198,17 @@ def _apply(spark: SparkSession, dataset: str) -> dict:
     }
 
 
-def _write_run_report(report: dict) -> str:
+def _write_run_report(report: dict) -> tuple[str, str]:
+
     os.makedirs(UPDATES_DIR, exist_ok=True)
-    report_path = os.path.join(UPDATES_DIR, "incremental_run_report.json")
-    with open(report_path, "w") as f:
+
+    with open(INCREMENTAL_REPORT_PATH, "w") as f:
         json.dump(report, f, indent=2, default=str)
-    return report_path
+
+    with open(INCREMENTAL_HISTORY_PATH, "a") as f:
+        f.write(json.dumps(report, default=str, ensure_ascii=False) + "\n")
+
+    return INCREMENTAL_REPORT_PATH, INCREMENTAL_HISTORY_PATH
 
 
 def main(argv: list[str]) -> int:
@@ -214,7 +222,9 @@ def main(argv: list[str]) -> int:
     spark = get_spark("Week3 Task1 - incremental update pipeline")
 
     report = {
+        "run_id": str(uuid.uuid4()),
         "started_at": datetime.now(timezone.utc).isoformat(),
+        "datasets_requested": selected,
         "datasets": {},
     }
 
@@ -226,8 +236,9 @@ def main(argv: list[str]) -> int:
             print(f"  {k}: {v}")
 
     report["finished_at"] = datetime.now(timezone.utc).isoformat()
-    report_path = _write_run_report(report)
-    print(f"\nRun report written to {report_path}")
+    latest_path, history_path = _write_run_report(report)
+    print(f"\nLatest run written to  {latest_path}")
+    print(f"History appended to    {history_path}")
 
     spark.stop()
     return 0

@@ -18,7 +18,6 @@ from common import (
 
 NEW_HOURS = 24 * 7
 
-
 def _load_raw(spark) -> DataFrame:
     if not os.path.exists(WEATHER_RAW_PATH):
         raise FileNotFoundError(f"Missing raw weather file at {WEATHER_RAW_PATH}")
@@ -107,10 +106,7 @@ def generate() -> dict:
         new_rows.append(row)
 
     output_columns = raw_columns + ["humidity"]
-    # Build an explicit schema derived from the raw file's inferred schema.
-    # Without this, ``createDataFrame`` fails on columns that happen to be
-    # ``None`` in every sampled template row (e.g. ``snwd`` / ``wpgt`` in the
-    # weather feed are almost always empty).
+    
     output_schema = StructType(
         list(raw.schema.fields) + [StructField("humidity", DoubleType(), True)]
     )
