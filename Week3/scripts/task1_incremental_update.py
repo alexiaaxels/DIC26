@@ -37,9 +37,11 @@ from common import (  # noqa: E402
     AIR_QUALITY_UPDATE_PATH,
     INCREMENTAL_HISTORY_PATH,
     INCREMENTAL_REPORT_PATH,
+    MONITORING_ENABLED,
     TAXI_TRIPS_DELTA,
     TAXI_TRIPS_UPDATE_PATH,
     UPDATES_DIR,
+    VALIDATION_ENABLED,
     WEATHER_DELTA,
     WEATHER_UPDATE_PATH,
     get_spark,
@@ -101,6 +103,18 @@ def _prepare(
 
     df = _load_update(spark, dataset)
     df = _standardize_column_names(df)
+
+    if not VALIDATION_ENABLED:
+        if config["timestamp_builder"]:
+            df = config["timestamp_builder"](df)
+        if config["transform"]:
+            df = config["transform"](df)
+        empty_rejected = (
+            df.limit(0)
+              .withColumn("_rule_id", lit(None).cast("string"))
+              .withColumn("_reject_reason", lit(None).cast("string"))
+        )
+        return df, empty_rejected, [], False
 
     schema_rule = SchemaContractRule(
         required=config["expected_cols"],
@@ -354,14 +368,15 @@ def main(argv: list[str]) -> int:
     for name in selected:
         print(f"\n=== Applying incremental update for {name} ===")
         stats = _apply(spark, name, run_id)
-        log_run(spark, "task1_incremental_update", stats, stats["schema_version"])
-        log_validation_metrics(
-            spark,
-            run_id=run_id,
-            dataset=name,
-            per_rule_metrics=stats.get("per_rule_metrics", []),
-            schema_version=stats["schema_version"],
-        )
+        if MONITORING_ENABLED:
+            log_run(spark, "task1_incremental_update", stats, stats["schema_version"])
+            log_validation_metrics(
+                spark,
+                run_id=run_id,
+                dataset=name,
+                per_rule_metrics=stats.get("per_rule_metrics", []),
+                schema_version=stats["schema_version"],
+            )
 
         validation_report["datasets"][name] = {
             "hard_failure": stats.get("hard_failure", False),

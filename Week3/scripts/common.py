@@ -9,6 +9,17 @@ os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 RANDOM_SEED = 20260923
 
+# Feature flags for Task 5 benchmarking. 
+def _flag(name: str, default: bool = True) -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.strip().lower() in {"1", "true", "yes", "on"}
+
+
+VALIDATION_ENABLED = _flag("DIC26_VALIDATION_ENABLED", True)
+MONITORING_ENABLED = _flag("DIC26_MONITORING_ENABLED", True)
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WEEK3_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir))
 REPO_ROOT = os.path.abspath(os.path.join(WEEK3_DIR, os.pardir))
