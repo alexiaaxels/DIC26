@@ -34,7 +34,30 @@ To run a subset:
 `python3 scripts/task1_incremental_update.py taxi_trips`
 `python3 scripts/task1_incremental_update.py weather air_quality`
 
+## Task 2
+
+### Maintain Analytical Consistency
+Run `python3 scripts/task2_update_data_products.py`
+
+## Task 3
 
 ### Monitoring queries
 
 Run `python3 scripts/task3_monitoring_queries.py` 
+
+## Task 5
+
+# Benchmark the platform
+
+Run from the Week3 folder:
+`python3 scripts/task5_benchmark.py`
+
+The benchmark measures:
+- incremental update time
+- analytical refresh time
+- storage overhead
+- validation overhead
+- monitoring overhead
+
+Results are printed to the terminal and saved to:
+`Data/reports/benchmark_results.json`

@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import time
+import statistics
 from datetime import datetime, timezone
 
 from delta.tables import DeltaTable
@@ -21,9 +22,16 @@ from common import (
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 INCREMENTAL_SCRIPT = os.path.join(SCRIPTS_DIR, "task1_incremental_update.py")
 REFRESH_SCRIPT = os.path.join(SCRIPTS_DIR, "task2_update_data_products.py")
+GENERATE_SCRIPT = os.path.join(SCRIPTS_DIR, "task1_generate_updates.py")
+REPO_ROOT = os.path.dirname(WEEK3_DIR)
+WEEK1_DELTA_DIR = os.path.join(REPO_ROOT, "Week1", "delta")
+WEEK2_DIR = os.path.join(REPO_ROOT, "Week2")
+WEEK2_PRODUCTS_SCRIPT = os.path.join(WEEK2_DIR, "task4_data_products.py")
+UPDATES_DIR = os.path.join(WEEK3_DIR, "Data", "updates")
 
 RESULTS_PATH = os.path.join(WEEK3_DIR, "Data", "reports", "benchmark_results.json")
 
+REPEATS = 3
 
 def _du_mb(path: str) -> float:
     if not os.path.exists(path):
@@ -90,8 +98,39 @@ def _run_refresh() -> float:
         raise RuntimeError("task2 refresh failed")
     return elapsed
 
+def _run_script(script: str, cwd: str) -> None:
+    result = subprocess.run([sys.executable, script], cwd=cwd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(result.stdout[-2000:])
+        print(result.stderr[-2000:], file=sys.stderr)
+        raise RuntimeError(f"{script} failed")
+
+def _prerequisites() -> None:
+    if not os.listdir(UPDATES_DIR) if os.path.exists(UPDATES_DIR) else True:
+        _run_script(GENERATE_SCRIPT, WEEK3_DIR)
+    if not os.path.exists(os.path.join(WEEK2_DIR, "delta", "data_products_metadata")):
+        _run_script(WEEK2_PRODUCTS_SCRIPT, WEEK2_DIR)
+
+def _storage() -> dict:
+    week1 = _du_mb(WEEK1_DELTA_DIR)
+    week2 = _du_mb(os.path.join(WEEK2_DIR, "delta"))
+    added = {
+        "rejects_mb": _du_mb(os.path.join(WEEK3_DIR, "delta", "rejects")),
+        "monitoring_mb": _du_mb(os.path.join(WEEK3_DIR, "delta", "monitoring")),
+        "reports_mb": _du_mb(os.path.join(WEEK3_DIR, "Data", "reports")),
+        "updates_dir_mb": _du_mb(UPDATES_DIR),
+    }
+    added_total = round(sum(added.values()), 2)
+    return {
+        "week1_delta_mb": week1,
+        "week2_products_mb": week2,
+        **added,
+        "week3_added_total_mb": added_total,
+        "overhead_pct_of_week1_week2": round(100 * added_total / (week1 + week2), 2),
+    }
 
 def main() -> int:
+    _prerequisites()
     spark = get_spark("Week3 Task5 - benchmark harness")
     spark.sparkContext.setLogLevel("WARN")
 
@@ -103,16 +142,9 @@ def main() -> int:
     for path, v in baseline_versions.items():
         print(f"  {os.path.relpath(path)}: version {v}")
 
-    storage = {
-        "taxi_trips_delta_mb": _du_mb(TAXI_TRIPS_DELTA),
-        "weather_delta_mb": _du_mb(WEATHER_DELTA),
-        "air_quality_delta_mb": _du_mb(AIR_QUALITY_DELTA),
-        "rejects_delta_mb": _du_mb(os.path.join(WEEK3_DIR, "delta", "rejects")),
-        "monitoring_delta_mb": _du_mb(os.path.join(WEEK3_DIR, "delta", "monitoring")),
-        "updates_dir_mb": _du_mb(os.path.join(WEEK3_DIR, "Data", "updates")),
-    }
+    storage_before = _storage()
 
-    print("\n[warm-up] running pipeline once to warm the JVM cache...")
+    print("\n[warm-up] running pipeline once ...")
     _ = _run_pipeline(validation=True, monitoring=True)
     for path, v in baseline_versions.items():
         _restore(spark, path, v)
@@ -124,12 +156,15 @@ def main() -> int:
         ("v_off__m_off", False, False),
     ]
 
-    pipeline_timings: dict[str, float] = {}
-    for name, v, m in configurations:
-        print(f"\n[bench] pipeline V={v} M={m} ...")
-        pipeline_timings[name] = _run_pipeline(validation=v, monitoring=m)
-        for path, ver in baseline_versions.items():
-            _restore(spark, path, ver)
+    samples: dict[str, list[float]] = {name: [] for name, _, _ in configurations}
+    for i in range(REPEATS):
+        for name, v, m in configurations:
+            print(f"\n[bench {i + 1}/{REPEATS}] pipeline V={v} M={m} ...")
+            samples[name].append(_run_pipeline(validation=v, monitoring=m))
+            for path, ver in baseline_versions.items():
+                _restore(spark, path, ver)
+
+    pipeline_timings = {name: round(statistics.median(s), 2) for name, s in samples.items()}
 
     print("\n[bench] refresh after full incremental update ...")
     _ = _run_pipeline(validation=True, monitoring=True)
@@ -137,12 +172,7 @@ def main() -> int:
     for path, v in baseline_versions.items():
         _restore(spark, path, v)
 
-    print("\n[bench] refresh after no-op (nothing changed) ...")
-    _ = _run_pipeline(validation=True, monitoring=True)
-    _ = _run_pipeline(validation=True, monitoring=True)
-    refresh_after_noop = _run_refresh()
-    for path, v in baseline_versions.items():
-        _restore(spark, path, v)
+    storage_after = _storage()
 
     baseline = pipeline_timings["v_on__m_on"]
     minimum = pipeline_timings["v_off__m_off"]
@@ -151,7 +181,10 @@ def main() -> int:
 
     results = {
         "measured_at": datetime.now(timezone.utc).isoformat(),
-        "storage_mb": storage,
+        "storage_before_mb": storage_before,
+        "storage_adter_mb": storage_after,
+        "repeats": REPEATS,
+        "pipeline_samples_s": samples,
         "pipeline_wallclock_s": pipeline_timings,
         "overhead_s": {
             "validation_marginal": validation_overhead,
@@ -161,7 +194,6 @@ def main() -> int:
         },
         "refresh_s": {
             "after_change": refresh_after_change,
-            "after_noop": refresh_after_noop,
         },
     }
 
@@ -172,9 +204,9 @@ def main() -> int:
     print("\n" + "=" * 62)
     print("BENCHMARK RESULTS")
     print("=" * 62)
-    print("\nStorage (MB):")
-    for k, v in storage.items():
-        print(f"  {k:<32s} {v:>8.2f}")
+    print(f"\n  {'Storage (MB)':<32s} {'before':>8}  {'after':>8}")
+    for k in storage_before:
+            print(f"  {k:<32s} {storage_before[k]:>8}  {storage_after[k]:>8}")
 
     print("\nIncremental pipeline wall-clock (seconds):")
     for k, v in pipeline_timings.items():
@@ -186,7 +218,6 @@ def main() -> int:
 
     print("\nAnalytical refresh (seconds):")
     print(f"  after change         {refresh_after_change:>8.2f}")
-    print(f"  after no-op          {refresh_after_noop:>8.2f}")
 
     print(f"\nFull results JSON: {RESULTS_PATH}")
 
