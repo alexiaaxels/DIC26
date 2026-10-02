@@ -33,3 +33,17 @@ The output is an analysis of the candidate features, not an automatic feature-se
 `python3 task2_training_dataset.py`
 
 Generates training, validation and test datasets. The output prints the number of rows in each for verification.
+
+## Train the ML model
+`python3 task3_ml_pipeline.py`
+
+By default, we use the latest version of the Delta table. To train a specific version, include the version number:
+`python3 task3_ml_pipeline.py 0`
+
+### The output
+Each run creates a folder `models/fare_model_v/` containing:
+- `training_info.json` which records the Delta version, features, seed, model parameters, and test metrics.
+- the trained model, including all preprocessing steps.
+
+### Retraining
+When new data is added, run the script again. It reuses the same pipeline and saves the model as a new version. Older models are kept for comparison.
