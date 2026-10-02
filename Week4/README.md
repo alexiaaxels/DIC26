@@ -34,7 +34,7 @@ The output is an analysis of the candidate features, not an automatic feature-se
 
 Generates training, validation and test datasets. The output prints the number of rows in each for verification.
 
-## Train the ML model
+## Task 3 - Train the ML model
 `python3 task3_ml_pipeline.py`
 
 By default, we use the latest version of the Delta table. To train a specific version, include the version number:
@@ -47,3 +47,6 @@ Each run creates a folder `models/fare_model_v/` containing:
 
 ### Retraining
 When new data is added, run the script again. It reuses the same pipeline and saves the model as a new version. Older models are kept for comparison.
+
+## Task 4 - Compare
+`python3 task4_compare.py`

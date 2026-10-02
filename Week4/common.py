@@ -1,6 +1,5 @@
 import os
 import sys
-from datetime import datetime, timezone
 
 os.environ["PYSPARK_PYTHON"] = sys.executable
 os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
@@ -59,7 +58,7 @@ def get_spark(app_name: str) -> SparkSession:
         .master("local[*]")
         .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
-        .config("spark.driver.memory", "4g")
+        .config("spark.driver.memory", "6g")
         .config("spark.jars.packages", "io.delta:delta-spark_2.13:4.0.0")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
         .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
