@@ -14,10 +14,40 @@ WEEK1_DELTA = os.path.join(REPO_ROOT, "Week1", "delta")
 WEEK2_DELTA = os.path.join(REPO_ROOT, "Week2", "delta")
 
 INTEGRATED_TAXI_TRIPS_PATH = os.path.join(WEEK1_DELTA, "integrated_taxi_trips")
-
+TAXI_TRIPS_PATH = os.path.join(WEEK1_DELTA, "taxi_trips")
+WEATHER_PATH = os.path.join(WEEK1_DELTA, "weather")
+AIR_QUALITY_PATH = os.path.join(WEEK1_DELTA, "air_quality")
+TAXI_ZONES_PATH = os.path.join(WEEK1_DELTA, "taxi_zone")
 
 def register_integrated(spark: SparkSession, view_name: str = "integrated_taxi_trips"):
     df = spark.read.format("delta").load(INTEGRATED_TAXI_TRIPS_PATH)
+    df.cache()
+    df.createOrReplaceTempView(view_name)
+    return df
+
+def register_taxi_trips(spark: SparkSession, view_name: str = "taxi_trips"):
+    df = spark.read.format("delta").load(TAXI_TRIPS_PATH)
+    df.cache()
+    df.createOrReplaceTempView(view_name)
+    return df
+
+
+def register_weather(spark: SparkSession, view_name: str = "weather"):
+    df = spark.read.format("delta").load(WEATHER_PATH)
+    df.cache()
+    df.createOrReplaceTempView(view_name)
+    return df
+
+
+def register_air_quality(spark: SparkSession, view_name: str = "air_quality"):
+    df = spark.read.format("delta").load(AIR_QUALITY_PATH)
+    df.cache()
+    df.createOrReplaceTempView(view_name)
+    return df
+
+
+def register_taxi_zones(spark: SparkSession,view_name: str = "taxi_zones"):
+    df = spark.read.format("delta").load(TAXI_ZONES_PATH)
     df.cache()
     df.createOrReplaceTempView(view_name)
     return df
@@ -39,3 +69,5 @@ def get_spark(app_name: str) -> SparkSession:
 
 
 TARGET = "fare_amount"
+
+
