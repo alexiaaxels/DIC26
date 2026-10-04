@@ -30,7 +30,14 @@ The output is an analysis of the candidate features, not an automatic feature-se
 - numerical features (ordered by correlation): calculates their correlation with fare_amount, allowing features with stronger relationships to be identified
 
 ## Generate training dataset
-`python3 task2_training_dataset.py`
+Have to specify which strategy to use, either using the raw dataset or integrated dataset.
+
+Raw:
+`python3 task2_training_dataset.py raw`
+
+Integrated:
+`python3 task2_training_dataset.py integrated`
+
 
 Generates training, validation and test datasets. The output prints the number of rows in each for verification.
 

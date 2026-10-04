@@ -1,10 +1,10 @@
 from pyspark.sql import functions as F
 from pyspark.ml import Pipeline
-from pyspark.ml.feature import StringIndexer, VectorAssembler, StandardScaler, Imputer
+from pyspark.ml.feature import StringIndexer, VectorAssembler, StandardScaler, Imputer, SQLTransformer
 
 import sys
 
-from common import TARGET, register_integrated, get_spark, register_weather, register_air_quality, register_taxi_trips, register_taxi_zones
+from common import TARGET, build_from_raw, register_integrated, get_spark, register_weather, register_air_quality, register_taxi_trips, register_taxi_zones
 
 FEATURES_CAT = [
     #"state_code",
@@ -29,27 +29,8 @@ FEATURES_DATE = [
 ]
 
 def generate_training_data(df, target, features_cat, features_date, features_num, train_ratio=0.7, validation_ratio=0.15, seed=42):
-    result = df
-
     # Remove rows where the target is missing
-    result = result.filter(F.col(target).isNotNull())
-
-    # prepare datetime features
-    date_features = []
-
-    for feature in features_date:
-        result = (
-            result
-            .withColumn(f"{feature}_hour", F.hour(F.col(feature)))
-            .withColumn(f"{feature}_day_of_week", F.dayofweek(F.col(feature)))
-            .withColumn(f"{feature}_month", F.month(F.col(feature)))
-        )
-
-        date_features.extend([
-            f"{feature}_hour",
-            f"{feature}_day_of_week",
-            f"{feature}_month"
-        ])
+    result = df.filter(F.col(target).isNotNull())
 
     # split
     train, validation, test = result.randomSplit(
@@ -60,6 +41,35 @@ def generate_training_data(df, target, features_cat, features_date, features_num
         ],
         seed=seed
     )
+    stages = build_feature_pipeline_stages(features_cat, features_num, features_date)
+    pipeline = Pipeline(stages = stages)
+
+    # fit preprocessing only on training data
+    pipeline_model = pipeline.fit(train)
+
+    # apply identical transformations to all three sets
+    train = pipeline_model.transform(train)
+    validation = pipeline_model.transform(validation)
+    test = pipeline_model.transform(test)
+
+    train = train.select(target, "features")
+    validation = validation.select(target, "features")
+    test = test.select(target, "features")
+
+    return train, validation, test
+
+def build_feature_pipeline_stages(features_cat, features_num, features_date):
+    date_exprs = ", ".join(
+        f"hour({c}) AS {c}_hour, dayofweek({c}) AS {c}_day_of_week, month({c}) AS {c}_month"
+        for c in features_date
+    )
+    date_stage = SQLTransformer(statement=f"SELECT *, {date_exprs} FROM __THIS__")
+
+    date_features = [
+        f"{c}_{suffix}"
+        for c in features_date
+        for suffix in ("hour", "day_of_week", "month")
+    ]
 
     # handle missing numerical values
     imputed_num = [
@@ -87,7 +97,6 @@ def generate_training_data(df, target, features_cat, features_date, features_num
         withStd=True
     )
 
-
     # encode categorical features
     indexers = [
         StringIndexer(
@@ -97,12 +106,11 @@ def generate_training_data(df, target, features_cat, features_date, features_num
         )
         for feature in features_cat
     ]
-    
+
     categorical_output = [
         f"{feature}_index"
         for feature in features_cat
     ]
-
 
     # combine all
     final_feature_columns = (
@@ -117,36 +125,8 @@ def generate_training_data(df, target, features_cat, features_date, features_num
         handleInvalid="keep"
     )
 
+    return [date_stage] + [imputer] + [numeric_assembler]  + [scaler]  + indexers + [final_assembler]
 
-    # build the pipeline
-    pipeline = Pipeline(
-        stages=(
-            [imputer]
-            + [numeric_assembler]
-            + [scaler]
-            + indexers
-            + [final_assembler]
-        )
-    )
-
-    # fit preprocessing only on training data
-    pipeline_model = pipeline.fit(train)
-
-    # apply identical transformations to all three sets
-    train = pipeline_model.transform(train)
-    validation = pipeline_model.transform(validation)
-    test = pipeline_model.transform(test)
-
-    train = train.select(target, "features")
-    validation = validation.select(target, "features")
-    test = test.select(target, "features")
-
-    return train, validation, test
-
-def prepare(zones, weather, aq, trips):
-    #TODO: implement cleaning & joins, maybe reuse from week1?
-    df = "placeholder"
-    return df
 
 def generate_datasets(strategy):
     if strategy == "integrated":
@@ -154,11 +134,7 @@ def generate_datasets(strategy):
         train, validation, test = generate_training_data(integrated_df, TARGET, FEATURES_CAT, FEATURES_DATE, FEATURES_NUM)
 
     elif strategy == "raw":
-        zones = register_taxi_zones
-        weather = register_weather
-        aq = register_air_quality
-        trips = register_taxi_trips
-        new_df = prepare(zones, weather, aq, trips)
+        new_df = build_from_raw(spark)
         train, validation, test = generate_training_data(new_df, TARGET, FEATURES_CAT, FEATURES_DATE, FEATURES_NUM)
     else:
         print("Please specify \"raw\" or \"integrated\" as a strategy.")
